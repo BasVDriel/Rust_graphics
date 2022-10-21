@@ -1,6 +1,6 @@
 use vecmath::*;
 use particle::Particle;
-static G: f32 = 0.001;
+static G: f32 = 50.0;
 pub struct GravityGrid{
     //pub gravity_grid: Grid,
     pub width: u32,
@@ -33,6 +33,12 @@ impl GravityGrid{
         }
     }
 
+    pub fn zero_mass(&mut self){
+        for i in 0..self.cell_mass.len(){
+            self.cell_mass[i] = 0.0;
+        }
+    }
+
     pub fn compute_force(&mut self, particles: &mut Vec<Particle>){
         //calculating the force
         let radius = 5;
@@ -47,21 +53,25 @@ impl GravityGrid{
                 let cell1_center: vecmath::Vector2<f32> = [cell1_bounds[0]+self.cell_size as f32/2.0, cell1_bounds[1]+self.cell_size as f32/2.0];
                 
                 //for each adjacent cell in radius
-                for y2 in (y1 as i32 -radius as i32)..(y1 as i32+radius as i32){
-                    if y2 < self.height as i32 && y2 >= 0{
-                        for x2 in (x1 as i32 -radius as i32)..(x1 as i32+radius as i32){
-                            if x2 < self.width as i32 && x2 >= 0{
-                                let cell2_mass = self.cell_mass.get((x2 + y2*self.width as i32) as usize).unwrap();
-                                let cell2_bounds = self.cell_bounds.get((x2 + y2*self.width as i32) as usize).unwrap();
-                                let cell2_center: vecmath::Vector2<f32> = [cell2_bounds[0]+self.cell_size as f32/2.0, cell2_bounds[1]+self.cell_size as f32/2.0];
-
-                                if !(cell2_bounds[0] == cell1_bounds[0] && cell2_bounds[1] == cell1_bounds[1]){
-                                    //calculate force
-                                    let dir= vec2_normalized_sub(cell2_center, cell1_center);
-                                    let dist_sqr = vec2_square_len(vec2_sub(cell1_center, cell2_center)); 
-                                    //add force of all these cells   
-                                    let inter = (cell2_mass*cell1_mass*G)/dist_sqr;
-                                    force = vec2_add(force, vec2_scale(dir, inter));
+                if *cell1_mass > 0.0{
+                    for y2 in (y1 as i32 -radius as i32)..(y1 as i32+radius as i32){
+                        if y2 < self.height as i32 && y2 >= 0{
+                            for x2 in (x1 as i32 -radius as i32)..(x1 as i32+radius as i32){
+                                if x2 < self.width as i32 && x2 >= 0{
+                                    let cell2_mass = self.cell_mass.get((x2 + y2*self.width as i32) as usize).unwrap();
+                                    let cell2_bounds = self.cell_bounds.get((x2 + y2*self.width as i32) as usize).unwrap();
+                                    let cell2_center: vecmath::Vector2<f32> = [cell2_bounds[0]+self.cell_size as f32/2.0, cell2_bounds[1]+self.cell_size as f32/2.0];
+                                    
+                                    if *cell2_mass > 0.0{
+                                        if !(cell2_bounds[0] == cell1_bounds[0] && cell2_bounds[1] == cell1_bounds[1]){
+                                            //calculate force
+                                            let dir= vec2_normalized_sub(cell2_center, cell1_center);
+                                            let dist_sqr = vec2_square_len(vec2_sub(cell1_center, cell2_center)); 
+                                            //add force of all these cells   
+                                            let inter = (cell2_mass*cell1_mass*G)/dist_sqr;
+                                            force = vec2_add(force, vec2_scale(dir, inter));
+                                        }
+                                    }
                                 }
                             }
                         }
@@ -81,28 +91,6 @@ impl GravityGrid{
                         //apply force code
                         let f = forces.get((x + y*self.width) as usize).unwrap();
                         p.applyForce(f[0], f[1]);
-                        cell_found = true;
-                    }
-                    if cell_found{
-                        break;
-                    }
-                }
-                if cell_found{
-                    break;
-                }
-            }
-        }
-    }
-
-    pub fn compute_mass(&mut self, particles: &Vec<Particle>){
-        for p in particles{
-            let mut cell_found = false;
-            for y in 0..self.height{
-                for x in 0..self.width{
-                    let bounds = self.cell_bounds.get((x + y*self.width) as usize).unwrap();
-                    if p.x_pos > bounds[0] && p.x_pos <= bounds[0]+self.cell_size as f32 && p.y_pos > bounds[1] && p.y_pos <= bounds[1]+self.cell_size as f32{
-                        let mut mass = self.cell_mass.get_mut((x + y*self.width) as usize).unwrap();
-                        *mass += p.mass;
                         cell_found = true;
                     }
                     if cell_found{

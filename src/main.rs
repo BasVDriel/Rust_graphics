@@ -56,25 +56,6 @@ impl World{
         //render things in the world
         self.gl.draw(arg.viewport(), |c, gl| {
             clear(background, gl);
-
-            // Draw a box rotating around the middle of the screen.
-
-            /*for x in 0..grid.rows{
-                for y in 0..grid.cols{
-                    //only draw if it's inside of the window
-                    if x < arg.draw_size[0]+grid.units as u32  && x > 0 && y < arg.draw_size[1]+grid.units as u32 && y > 0{
-                        let transform = c
-                        .transform
-                        .trans(x as f64 * grid.units, y as f64 * grid.units);
-
-                        let mut color =  color::BLACK;
-                        if (x%2 == 0 && y%2 ==0) || ((x+1)%2 == 0 && (y+1)%2== 0){
-                            color = color::RED;
-                        }    
-                        rectangle(color, square, transform, gl); 
-                    } 
-                }
-            }*/
         });
         
     }
@@ -120,14 +101,16 @@ fn main(){
         }
 
         if let Some(u_args) = e.update_args(){
-            GG1.compute_mass(&particles);
-            GG1.compute_force(& mut particles);
-            GG2.compute_mass(&particles);
-            GG2.compute_force(& mut particles);
+            //set mass to zero and then compute the mass per cell
+            GG1.zero_mass();
+            GG2.zero_mass();
             for p in &mut particles{
+                p.compute_mass(&mut GG1);
+                p.compute_mass(&mut GG2);
                 p.update(&u_args);
-
             }
+            GG1.compute_force(& mut particles);
+            GG2.compute_force(& mut particles);
         }
     }
 }
