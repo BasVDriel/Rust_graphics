@@ -4,8 +4,8 @@ extern crate opengl_graphics;
 extern crate piston;
 extern crate rand;
 extern crate vecmath;
+extern crate crossbeam;
 
-use std::cell;
 use graphics::Line;
 use graphics::math;
 use graphics::color::*;
@@ -17,7 +17,6 @@ use piston::input::*;
 use glutin_window::GlutinWindow;
 use opengl_graphics::{GlGraphics, OpenGL};
 use rand::distributions::{Distribution, Uniform};
-use std::collections::HashMap;
 
 mod particle;
 use particle::Particle;
@@ -103,14 +102,18 @@ fn main(){
         if let Some(u_args) = e.update_args(){
             //set mass to zero and then compute the mass per cell
             GG1.zero_mass();
+            GG1.compute_mass(&mut particles);
+            GG1.compute_force();
+            GG1.apply_force(&mut particles);
+
             GG2.zero_mass();
+            GG2.compute_mass(&mut particles);   
+            GG2.compute_force();
+            GG2.apply_force(&mut particles);
+
             for p in &mut particles{
-                p.compute_mass(&mut GG1);
-                p.compute_mass(&mut GG2);
                 p.update(&u_args);
             }
-            GG1.compute_force(& mut particles);
-            GG2.compute_force(& mut particles);
         }
     }
 }

@@ -1,36 +1,46 @@
 use vecmath::*;
 use particle::Particle;
-static G: f32 = 50.0;
+use crossbeam::*;
+
+static G: f32 = 100.0;
 pub struct GravityGrid{
     //pub gravity_grid: Grid,
     pub width: u32,
     pub height: u32,
     pub cell_size: f64,
     pub cell_mass: Vec<f32>,
-    pub cell_bounds: Vec<[f32; 2]>,
+    cell_forces: Vec<Vector2<f32>>,
 }
 
 impl GravityGrid{
     pub fn new(grid_width: u32, grid_height: u32, cell_size: f64) -> GravityGrid{
         let cell_mass = vec![0.0; (grid_height*grid_width) as usize];
-
-        //compute cell bounds
-        let mut cell_bounds = Vec::new();
-        for y in 0..grid_width{
-            let y_min = y as f32 * cell_size as f32;
-            for x in 0..grid_height{
-                let x_min = x as f32 * cell_size as f32;
-                cell_bounds.push([x_min, y_min]);
-            }
-        }
+        let zero: Vector2<f32> = [0.0,0.0];
+        let cell_forces = vec![zero; (grid_height*grid_width) as usize];
 
         GravityGrid {
             width: grid_width, 
             height: grid_height, 
             cell_size: cell_size, 
             cell_mass: cell_mass, 
-            cell_bounds: cell_bounds
+            cell_forces: cell_forces,
         }
+    }
+
+    fn get_index(&self, particle: &mut Particle) -> Option<usize>{
+        let x = particle.x_pos as f32;
+        let y = particle.y_pos as f32;
+        let cell_size = self.cell_size as f32;
+
+        let x_index = (x/cell_size).floor() as u32;
+        let y_index = (y/cell_size).floor() as u32;
+
+        let mut index = None;
+        if x_index < self.width && y_index < self.height{
+            index = Some((y_index*self.width + x_index) as usize);
+            particle.index = index;
+        }
+        index
     }
 
     pub fn zero_mass(&mut self){
@@ -39,68 +49,112 @@ impl GravityGrid{
         }
     }
 
-    pub fn compute_force(&mut self, particles: &mut Vec<Particle>){
-        //calculating the force
-        let radius = 5;
-        let mut forces: Vec<Vector2<f32>> = Vec::new();
-
-        for y1 in 0..self.height{
-            for x1 in 0..self.width{
-                //for each cell
-                let mut force: vecmath::Vector2<f32> = [0.0f32, 0.0f32];
-                let cell1_mass = self.cell_mass.get((x1 + y1*self.width) as usize).unwrap();
-                let cell1_bounds = self.cell_bounds.get((x1 + y1*self.width) as usize).unwrap();
-                let cell1_center: vecmath::Vector2<f32> = [cell1_bounds[0]+self.cell_size as f32/2.0, cell1_bounds[1]+self.cell_size as f32/2.0];
-                
-                //for each adjacent cell in radius
-                if *cell1_mass > 0.0{
-                    for y2 in (y1 as i32 -radius as i32)..(y1 as i32+radius as i32){
-                        if y2 < self.height as i32 && y2 >= 0{
-                            for x2 in (x1 as i32 -radius as i32)..(x1 as i32+radius as i32){
-                                if x2 < self.width as i32 && x2 >= 0{
-                                    let cell2_mass = self.cell_mass.get((x2 + y2*self.width as i32) as usize).unwrap();
-                                    let cell2_bounds = self.cell_bounds.get((x2 + y2*self.width as i32) as usize).unwrap();
-                                    let cell2_center: vecmath::Vector2<f32> = [cell2_bounds[0]+self.cell_size as f32/2.0, cell2_bounds[1]+self.cell_size as f32/2.0];
-                                    
-                                    if *cell2_mass > 0.0{
-                                        if !(cell2_bounds[0] == cell1_bounds[0] && cell2_bounds[1] == cell1_bounds[1]){
-                                            //calculate force
-                                            let dir= vec2_normalized_sub(cell2_center, cell1_center);
-                                            let dist_sqr = vec2_square_len(vec2_sub(cell1_center, cell2_center)); 
-                                            //add force of all these cells   
-                                            let inter = (cell2_mass*cell1_mass*G)/dist_sqr;
-                                            force = vec2_add(force, vec2_scale(dir, inter));
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-                forces.push(force);
-            }
-        }
-
-        //applying the force
-        for p in particles{
-            let mut cell_found = false;
-            for y in 0..self.height{
-                for x in 0..self.width{
-                    let bounds = self.cell_bounds.get((x + y*self.width) as usize).unwrap();
-                    if p.x_pos > bounds[0] && p.x_pos <= bounds[0]+self.cell_size as f32 && p.y_pos > bounds[1] && p.y_pos <= bounds[1]+self.cell_size as f32{
-                        //apply force code
-                        let f = forces.get((x + y*self.width) as usize).unwrap();
-                        p.applyForce(f[0], f[1]);
-                        cell_found = true;
-                    }
-                    if cell_found{
-                        break;
-                    }
-                }
-                if cell_found{
-                    break;
-                }
+    pub fn compute_mass(&mut self, particles: &mut Vec<Particle>){
+        for particle in particles.iter_mut(){
+            let cell_index = self.get_index(particle);
+            if cell_index != None{
+                let cell = self.cell_mass.get_mut(cell_index.unwrap()).unwrap();
+                *cell = *cell + particle.mass;
             }
         }
     }
+
+    pub fn compute_force(&mut self){
+        let radius: usize = 5;
+        //for first cell
+        for y1 in 0..self.height as isize{
+            for x1 in 0..self.width as isize{
+                //make sure that every check is within bounds
+                let mut y_bound_low = y1 - radius as isize;
+                let mut y_bound_high = y1 + radius as isize;
+                let mut x_bound_low = x1 - radius as isize;
+                let mut x_bound_high = x1 + radius as isize;
+                if y_bound_low < 0 {
+                    y_bound_low = 0;
+                }
+                if y_bound_high > self.height as isize - 1{
+                    y_bound_high = self.height as isize - 1;
+                }
+                if x_bound_low < 0{
+                    x_bound_low = 0;
+                }
+                if x_bound_high > self.width as isize - 1{
+                    x_bound_high = self.width as isize - 1;
+                    2;
+                }
+
+                //store all the permutations in a vector for mulithreading
+                let threads: usize = 1;
+                struct Permutation{
+                    x1: isize,
+                    y1: isize,
+                    mass1: f32,
+                    x2: isize,
+                    y2: isize,
+                    mass2: f32,
+                    cell_size: f32,
+                }
+                let mut permutations = Vec::new();
+                let index1 = y1 as usize*self.width as usize + x1 as usize;
+                for y2 in y_bound_low..y_bound_high{
+                    for x2 in x_bound_low..x_bound_high as isize{
+                        let index2 = y2 as usize*self.width as usize + x2 as usize;
+                        let mass1 = self.cell_mass[index1];
+                        let mass2 = self.cell_mass[index2];
+                        if index1 != index2 && mass1 != 0.0 && mass2 != 0.0{
+                            permutations.push(Permutation{
+                                x1: x1, 
+                                y1: y1, 
+                                x2: x2, 
+                                y2: y2, 
+                                mass1:  mass1,
+                                mass2: mass2,
+                                cell_size: self.cell_size as f32,
+                            });
+                        }
+
+                    }
+                }
+                let mut cell_forces: Vec<Vector2<f32>> = Vec::new();
+                for n in 0..threads{
+                    //split the permutations into chunks
+                    let chunk = permutations.split_off(permutations.len()/threads);
+                    //spawn a thread for each chunk and calculate the force
+                    scope(|scope| {
+                        let thread = scope.spawn(move |_| {
+                            let mut perm_force = [0.0f32, 0.0f32];
+                            for perm in chunk.iter(){
+                                let distance = (((perm.x1 as f32 - perm.x2 as f32)*perm.cell_size).powi(2) + ((perm.y1 as f32 - perm.y2 as f32)*perm.cell_size).powi(2)).sqrt();
+                                let force = G*perm.mass1*perm.mass2/distance.powi(2);
+                                let angle = (perm.y2 as f32 - perm.y1 as f32).atan2(perm.x2 as f32 - perm.x1 as f32);
+                                let force_x = force*angle.cos();
+                                let force_y = force*angle.sin();
+                                let force_vector: Vector2<f32> = [force_x, force_y];
+                                perm_force = vec2_add(perm_force, force_vector);
+                            }
+                            perm_force
+                        });
+                        //concatenate the forces vector from the thread to the return vector
+                        let perm_force = thread.join().unwrap();
+                        cell_forces.push(perm_force);
+                    });
+                }
+                let mut ret_force: Vector2<f32> = [0.0, 0.0]; 
+                for force in cell_forces{
+                    ret_force = vec2_add(ret_force, force);
+                }
+                self.cell_forces[index1] = ret_force;
+            }   
+        }
+    }
+
+    pub fn apply_force(&mut self, particles: &mut Vec<Particle>){
+        for particle in particles.iter_mut(){
+            if !particle.index.is_none(){
+                let force = self.cell_forces.get(particle.index.unwrap()).unwrap();
+                particle.apply_force(force[0], force[1])
+            }
+        }
+    }
+
 }
