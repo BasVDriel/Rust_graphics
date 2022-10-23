@@ -102,10 +102,10 @@ fn main(){
 
         if let Some(u_args) = e.update_args(){
             //set mass to zero and then compute the mass per cell
-            GG1.zero_mass();
-            GG1.compute_mass(&mut particles);
-            GG1.compute_force();
-            GG1.apply_force(&mut particles);
+            //GG1.zero_mass();
+            //GG1.compute_mass(&mut particles);
+            //GG1.compute_force();
+            //GG1.apply_force(&mut particles);
 
             GG2.zero_mass();
             GG2.compute_mass(&mut particles);   
@@ -115,6 +115,8 @@ fn main(){
             for p in &mut particles{
                 p.update(&u_args);
             }
+            let mut fps = 1.0 / u_args.dt;
+            println!("fps: {}", fps);
         }
     }
 }

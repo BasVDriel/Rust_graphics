@@ -1,6 +1,17 @@
+use std::cell;
+
 use vecmath::*;
 use particle::Particle;
 use crossbeam::*;
+
+struct Permutation{
+    x1: isize,
+    y1: isize,
+    mass1: f32,
+    x2: isize,
+    y2: isize,
+    mass2: f32,
+}
 
 static G: f32 = 100.0;
 pub struct GravityGrid{
@@ -61,6 +72,7 @@ impl GravityGrid{
 
     pub fn compute_force(&mut self){
         let radius: usize = 5;
+        let cell_size = self.cell_size as f32;
         //for first cell
         for y1 in 0..self.height as isize{
             for x1 in 0..self.width as isize{
@@ -80,70 +92,42 @@ impl GravityGrid{
                 }
                 if x_bound_high > self.width as isize - 1{
                     x_bound_high = self.width as isize - 1;
-                    2;
                 }
 
                 //store all the permutations in a vector for mulithreading
-                let threads: usize = 1;
-                struct Permutation{
-                    x1: isize,
-                    y1: isize,
-                    mass1: f32,
-                    x2: isize,
-                    y2: isize,
-                    mass2: f32,
-                    cell_size: f32,
-                }
-                let mut permutations = Vec::new();
+                let threads: usize = 8;
                 let index1 = y1 as usize*self.width as usize + x1 as usize;
+                let mut cell_force: Vector2<f32> = [0.0,0.0];
                 for y2 in y_bound_low..y_bound_high{
                     for x2 in x_bound_low..x_bound_high as isize{
                         let index2 = y2 as usize*self.width as usize + x2 as usize;
                         let mass1 = self.cell_mass[index1];
                         let mass2 = self.cell_mass[index2];
                         if index1 != index2 && mass1 != 0.0 && mass2 != 0.0{
-                            permutations.push(Permutation{
+                            let perm = Permutation{
                                 x1: x1, 
                                 y1: y1, 
                                 x2: x2, 
                                 y2: y2, 
                                 mass1:  mass1,
-                                mass2: mass2,
-                                cell_size: self.cell_size as f32,
-                            });
+                                mass2: mass2
+                            };
+                            scope(|scope| {
+                                let handle = scope.spawn(move |_| {
+                                    let mut force_vector = [0.0f32, 0.0f32];
+                                    let distance = (((perm.x1 as f32 - perm.x2 as f32)*cell_size).powi(2) + ((perm.y1 as f32 - perm.y2 as f32)*cell_size).powi(2)).sqrt();
+                                    let force = G*perm.mass1*perm.mass2/distance.powi(2);
+                                    let angle = (perm.y2 as f32 - perm.y1 as f32).atan2(perm.x2 as f32 - perm.x1 as f32);
+                                    let force_x = force*angle.cos();
+                                    let force_y = force*angle.sin();
+                                    force_vector = [force_x, force_y];
+                                    cell_force = vec2_add(cell_force, force_vector);
+                                });
+                            }).unwrap();
                         }
-
                     }
                 }
-                let mut cell_forces: Vec<Vector2<f32>> = Vec::new();
-                for n in 0..threads{
-                    //split the permutations into chunks
-                    let chunk = permutations.split_off(permutations.len()/threads);
-                    //spawn a thread for each chunk and calculate the force
-                    scope(|scope| {
-                        let thread = scope.spawn(move |_| {
-                            let mut perm_force = [0.0f32, 0.0f32];
-                            for perm in chunk.iter(){
-                                let distance = (((perm.x1 as f32 - perm.x2 as f32)*perm.cell_size).powi(2) + ((perm.y1 as f32 - perm.y2 as f32)*perm.cell_size).powi(2)).sqrt();
-                                let force = G*perm.mass1*perm.mass2/distance.powi(2);
-                                let angle = (perm.y2 as f32 - perm.y1 as f32).atan2(perm.x2 as f32 - perm.x1 as f32);
-                                let force_x = force*angle.cos();
-                                let force_y = force*angle.sin();
-                                let force_vector: Vector2<f32> = [force_x, force_y];
-                                perm_force = vec2_add(perm_force, force_vector);
-                            }
-                            perm_force
-                        });
-                        //concatenate the forces vector from the thread to the return vector
-                        let perm_force = thread.join().unwrap();
-                        cell_forces.push(perm_force);
-                    });
-                }
-                let mut ret_force: Vector2<f32> = [0.0, 0.0]; 
-                for force in cell_forces{
-                    ret_force = vec2_add(ret_force, force);
-                }
-                self.cell_forces[index1] = ret_force;
+                self.cell_forces[index1] = cell_force;
             }   
         }
     }

@@ -1,8 +1,6 @@
-use piston::event_loop::*;
 use piston::input::*;
 use opengl_graphics::{GlGraphics, OpenGL};
 use graphics::color::*;
-use gravity_grid::GravityGrid;
 
 pub struct Particle{
     pub x_pos: f32,
