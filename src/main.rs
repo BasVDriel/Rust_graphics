@@ -30,6 +30,7 @@ pub struct World{
     pub height: f64, 
 }
 
+
 impl World{
     fn new(gl: GlGraphics, cell_size: f64, grid_width: u32, grid_height: u32, subdevision: u64) -> World{
         //cell size is the smallest cell containing 
