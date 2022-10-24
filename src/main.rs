@@ -4,7 +4,7 @@ extern crate opengl_graphics;
 extern crate piston;
 extern crate rand;
 extern crate vecmath;
-extern crate crossbeam;
+extern crate rayon;
 
 use graphics::Line;
 use graphics::math;
@@ -17,6 +17,7 @@ use piston::input::*;
 use glutin_window::GlutinWindow;
 use opengl_graphics::{GlGraphics, OpenGL};
 use rand::distributions::{Distribution, Uniform};
+use std::time::SystemTime;
 
 mod particle;
 use particle::Particle;
@@ -80,7 +81,7 @@ fn main(){
 
     //generate particles
     let mut particles: Vec<Particle> = Vec::new();
-    let n_particles= 100;
+    let n_particles: usize = 1000;
     for n in 0..n_particles {
         let particle = Particle::new(x_range.sample(&mut rng),  y_range.sample(&mut rng), 1.0);
         particles.push(particle);
@@ -89,6 +90,10 @@ fn main(){
     let mut GG1 = GravityGrid::new(9,9, 700.0/9.0);
     let mut GG2 = GravityGrid::new(27,27, 700.0/27.0);
 
+    
+
+
+
     //event handles
     let mut events = Events::new(EventSettings::new());
     while let Some(e) = events.next(&mut window) {
@@ -96,16 +101,16 @@ fn main(){
         if let Some(r_args) = e.render_args() {
             world.render(&r_args);
             for p in &mut particles{
-                p.render(&r_args, &mut GlGraphics::new(opengl));
+                //p.render(&r_args, &mut GlGraphics::new(opengl));
             } 
         }
-
         if let Some(u_args) = e.update_args(){
-            //set mass to zero and then compute the mass per cell
-            //GG1.zero_mass();
-            //GG1.compute_mass(&mut particles);
-            //GG1.compute_force();
-            //GG1.apply_force(&mut particles);
+            let t_now = SystemTime::now();
+
+            GG1.zero_mass();
+            GG1.compute_mass(&mut particles);
+            GG1.compute_force();
+            GG1.apply_force(&mut particles);
 
             GG2.zero_mass();
             GG2.compute_mass(&mut particles);   
@@ -115,8 +120,8 @@ fn main(){
             for p in &mut particles{
                 p.update(&u_args);
             }
-            let mut fps = 1.0 / u_args.dt;
-            println!("fps: {}", fps);
+            let period = t_now.elapsed().unwrap().as_secs_f64();
+            println!("physics fps {}", 1.0/period);
         }
     }
 }
