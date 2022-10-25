@@ -1,4 +1,5 @@
 [package]
+resolver = "2"
 
 name = "simulation"
 version = "0.1.0"
@@ -10,12 +11,14 @@ authors = [
 name = "simulation"
 
 [dependencies]
-piston = "0.53.0"
-piston2d-graphics = "0.42.0"
-pistoncore-glutin_window = "0.69.0"
-piston2d-opengl_graphics = "0.81.0"
 rand = "0.8.5"
-crossbeam = "0.8.2"
+rayon = "1.5"
+pixels = "0.9.0"
+winit = "0.27"
+winit_input_helper = "0.13"
+env_logger = "0.9"
+log = "0.4"
+
 
 [dependencies.vecmath]
 version = "1.0.0"

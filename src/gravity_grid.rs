@@ -1,8 +1,6 @@
-use std::cell;
-
+use rayon::prelude::*;
 use vecmath::*;
 use particle::Particle;
-use crossbeam::*;
 
 struct Permutation{
     x1: isize,
@@ -11,9 +9,10 @@ struct Permutation{
     x2: isize,
     y2: isize,
     mass2: f32,
+    cell_size: f32,
 }
 
-static G: f32 = 100.0;
+static G: f32 = 10.0;
 pub struct GravityGrid{
     //pub gravity_grid: Grid,
     pub width: u32,
@@ -70,6 +69,35 @@ impl GravityGrid{
         }
     }
 
+    fn compute_gravity(cell_size: f32, x1: isize, y1: isize, mass1: f32, x2: isize,  y2: isize, mass2: f32)-> Vector2<f32>{
+        //compute the force between two cells using the formula F = G*m1*m2/r^2
+        let x = (x2 - x1) as f32 * cell_size;
+        let y = (y2 - y1) as f32 * cell_size;
+        let r_squared = x*x + y*y;
+        let force = G*mass1*mass2/r_squared;
+        let angle = y.atan2(x);
+        let x_force = force*angle.cos();
+        let y_force = force*angle.sin();
+        [x_force, y_force]
+    }
+
+    fn devide_and_conquer(perms: &mut [Permutation]) -> [f32; 2]{
+        let l = perms.len();
+        if l >= 2 {
+            let mid = perms.len()/2;
+            let (lo, hi) = perms.split_at_mut(mid);
+            let (f1, f2) = rayon::join(
+                || GravityGrid::devide_and_conquer(lo),
+                || GravityGrid::devide_and_conquer(hi),
+            );
+            return [f1[0] + f2[0], f1[1] + f2[1]]
+        }
+        else{   
+            let perm = &perms[0];
+            return GravityGrid::compute_gravity(perm.cell_size, perm.x1, perm.y1, perm.mass1, perm.x2, perm.y2, perm.mass2)
+        }
+    }
+
     pub fn compute_force(&mut self){
         let radius: usize = 5;
         let cell_size = self.cell_size as f32;
@@ -95,48 +123,46 @@ impl GravityGrid{
                 }
 
                 //store all the permutations in a vector for mulithreading
-                let threads: usize = 8;
                 let index1 = y1 as usize*self.width as usize + x1 as usize;
-                let mut cell_force: Vector2<f32> = [0.0,0.0];
+                let mut permutations: Vec<Permutation> = Vec::new();
                 for y2 in y_bound_low..y_bound_high{
                     for x2 in x_bound_low..x_bound_high as isize{
                         let index2 = y2 as usize*self.width as usize + x2 as usize;
                         let mass1 = self.cell_mass[index1];
                         let mass2 = self.cell_mass[index2];
-                        if index1 != index2 && mass1 != 0.0 && mass2 != 0.0{
+                        if mass1 != 0.0 && mass2 != 0.0 && index1 != index2{
                             let perm = Permutation{
-                                x1: x1, 
-                                y1: y1, 
-                                x2: x2, 
-                                y2: y2, 
-                                mass1:  mass1,
-                                mass2: mass2
+                                x1: x1,
+                                y1: y1,
+                                mass1: mass1,
+                                x2: x2,
+                                y2: y2,
+                                mass2: mass2,
+                                cell_size: cell_size,
                             };
-                            scope(|scope| {
-                                let handle = scope.spawn(move |_| {
-                                    let mut force_vector = [0.0f32, 0.0f32];
-                                    let distance = (((perm.x1 as f32 - perm.x2 as f32)*cell_size).powi(2) + ((perm.y1 as f32 - perm.y2 as f32)*cell_size).powi(2)).sqrt();
-                                    let force = G*perm.mass1*perm.mass2/distance.powi(2);
-                                    let angle = (perm.y2 as f32 - perm.y1 as f32).atan2(perm.x2 as f32 - perm.x1 as f32);
-                                    let force_x = force*angle.cos();
-                                    let force_y = force*angle.sin();
-                                    force_vector = [force_x, force_y];
-                                    cell_force = vec2_add(cell_force, force_vector);
-                                });
-                            }).unwrap();
+                            permutations.push(perm);
                         }
                     }
                 }
-                self.cell_forces[index1] = cell_force;
+                if permutations.len() == 0{
+                    self.cell_forces[index1] = [0.0, 0.0];
+                }
+                else{
+                    self.cell_forces[index1] = GravityGrid::devide_and_conquer(&mut permutations);
+                }      
             }   
         }
     }
 
     pub fn apply_force(&mut self, particles: &mut Vec<Particle>){
         for particle in particles.iter_mut(){
-            if !particle.index.is_none(){
-                let force = self.cell_forces.get(particle.index.unwrap()).unwrap();
-                particle.apply_force(force[0], force[1])
+            if particle.index.is_some(){
+                let force = self.cell_forces.get(particle.index.unwrap());
+                if force.is_some(){
+                    //apply the force to the particle
+                    let force = force.unwrap();
+                    particle.apply_force(force[0], force[1]);
+                }
             }
         }
     }

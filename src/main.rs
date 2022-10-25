@@ -1,82 +1,97 @@
-extern crate glutin_window;
-extern crate graphics;
-extern crate opengl_graphics;
-extern crate piston;
 extern crate rand;
 extern crate vecmath;
 extern crate rayon;
+extern crate pixels;
+extern crate winit_input_helper;
+extern crate winit;
+extern crate log;
+extern crate env_logger;
 
-use graphics::Line;
-use graphics::math;
-use graphics::color::*;
-use graphics::draw_state;
-use graphics::grid::Grid;
-use piston::window::WindowSettings;
-use piston::event_loop::*;
-use piston::input::*;
-use glutin_window::GlutinWindow;
-use opengl_graphics::{GlGraphics, OpenGL};
+use std::time::Duration;
+
 use rand::distributions::{Distribution, Uniform};
-use std::time::SystemTime;
+use pixels::{Error, Pixels, SurfaceTexture};
+use winit::dpi::LogicalSize;
+use winit::event::{Event, VirtualKeyCode};
+use winit::event_loop::{ControlFlow, EventLoop};
+use winit::window::WindowBuilder;
+use winit_input_helper::WinitInputHelper;
+use log::error;
 
 mod particle;
 use particle::Particle;
 mod gravity_grid;
 use gravity_grid::GravityGrid;
 
-pub struct World{
-    gl: GlGraphics, // OpenGL drawing backend.
-    draw_grid: Grid,
-    pub width: f64, //
-    pub height: f64, 
+const WIDTH: u32 = 800;
+const HEIGHT: u32 = 800;
+
+struct World {
+    GG1: GravityGrid,
+    GG2: GravityGrid,
+    particles: Vec<Particle>,
 }
 
-
-impl World{
-    fn new(gl: GlGraphics, cell_size: f64, grid_width: u32, grid_height: u32, subdevision: u64) -> World{
-        //cell size is the smallest cell containing 
-        let draw_grid = Grid{
-            cols: grid_height,
-            rows: grid_width,
-            units: cell_size,
-        };
-
-        let width = cell_size*(grid_width as f64);
-        let height = cell_size*(grid_height as f64);
-
-        World {gl: gl, draw_grid: draw_grid, width: width, height: height} //returns the world sturct
+impl World {
+    fn new(gg1: GravityGrid, gg2: GravityGrid, particles: Vec<Particle>) -> World{
+        World { 
+            GG1: gg1,
+            GG2: gg2,
+            particles: particles 
+        }
     }
 
-    fn render(&mut self, arg: &RenderArgs){
-        use graphics::*;
+    fn update(&mut self, dt: f32){
+        self.GG1.zero_mass();
+        self.GG1.compute_mass(&mut self.particles);
+        self.GG1.compute_force();
+        self.GG1.apply_force(&mut self.particles);
 
-        let grid = self.draw_grid;
-        let background: [f32; 4] = [0.0, 0.0, 0.0, 1.0];
-        let square = rectangle::square(0.0, 0.0, grid.units);
+        self.GG2.zero_mass();
+        self.GG2.compute_mass(&mut self.particles);   
+        self.GG2.compute_force();
+        self.GG2.apply_force(&mut self.particles);
+        for p in &mut self.particles{
+            p.update(dt);
+        }
+    }
 
-        //render things in the world
-        self.gl.draw(arg.viewport(), |c, gl| {
-            clear(background, gl);
-        });
-        
+    fn draw(&self, frame: &mut [u8]) {
+        for p in &self.particles{
+            let x = p.x_pos as u32;
+            let y = p.y_pos as u32;
+            if x < WIDTH && y < HEIGHT{
+                let index = (y*WIDTH + x) as usize;
+                frame[index*4] = 255;
+                frame[index*4 + 1] = 0;
+                frame[index*4 + 2] = 0;
+                frame[index*4 + 3] = 255;
+            }
+        }
     }
 }
-
 
 fn main(){
-    //Generate window
-    let opengl = OpenGL::V3_2;
-    let mut window: GlutinWindow = WindowSettings::new("my window", [700, 700])
-        .graphics_api(opengl)
-        .exit_on_esc(true)
-        .build()
-        .unwrap();
+    env_logger::init();
+    let event_loop = EventLoop::new();
+    let mut input = WinitInputHelper::new();
+    let window = {
+        let size = LogicalSize::new(WIDTH as f64, HEIGHT as f64);
+        WindowBuilder::new()
+            .with_title("Particle simulation")
+            .with_inner_size(size)
+            .with_min_inner_size(size)
+            .build(&event_loop)
+            .unwrap()
+    };
 
-    let mut world = World::new(GlGraphics::new(opengl), 10.0, 1000, 1000, 10);
-    
+    let window_size = window.inner_size();
+    let surface_texture = SurfaceTexture::new(window_size.width, window_size.height, &window);
+    let mut pixels =  Pixels::new(WIDTH, HEIGHT, surface_texture).unwrap();
+
     //distributions
-    let x_range = Uniform::new(0.0, 700.0);
-    let y_range = Uniform::new(0.0, 700.0);
+    let x_range = Uniform::new(0.0, WIDTH as f32);
+    let y_range = Uniform::new(0.0, HEIGHT as f32);
     let mut rng = rand::thread_rng();
 
     //generate particles
@@ -87,41 +102,51 @@ fn main(){
         particles.push(particle);
     }
 
-    let mut GG1 = GravityGrid::new(9,9, 700.0/9.0);
-    let mut GG2 = GravityGrid::new(27,27, 700.0/27.0);
+    let mut GG1 = GravityGrid::new(9,9, WIDTH as f64/9.0);
+    let mut GG2 = GravityGrid::new(27,27, WIDTH as f64/27.0);
 
+    let mut world = World::new(GG1, GG2, particles);
     
-
-
-
-    //event handles
-    let mut events = Events::new(EventSettings::new());
-    while let Some(e) = events.next(&mut window) {
-        //if render event do something
-        if let Some(r_args) = e.render_args() {
-            world.render(&r_args);
-            for p in &mut particles{
-                //p.render(&r_args, &mut GlGraphics::new(opengl));
-            } 
+    let mut elapsed: Option<Duration> = None;
+    let mut dt = 0.0;
+    event_loop.run(move |event, _, control_flow| {
+        // Draw the current frame
+        // get time
+        let now = Some(std::time::Instant::now());
+        if elapsed.is_some() {;
+            dt = elapsed.unwrap().as_secs_f32();
         }
-        if let Some(u_args) = e.update_args(){
-            let t_now = SystemTime::now();
 
-            GG1.zero_mass();
-            GG1.compute_mass(&mut particles);
-            GG1.compute_force();
-            GG1.apply_force(&mut particles);
-
-            GG2.zero_mass();
-            GG2.compute_mass(&mut particles);   
-            GG2.compute_force();
-            GG2.apply_force(&mut particles);
-
-            for p in &mut particles{
-                p.update(&u_args);
+        if let Event::RedrawRequested(_) = event {
+            world.draw(pixels.get_frame());
+            if pixels
+                .render()
+                .map_err(|e| error!("pixels.render() failed: {}", e))
+                .is_err()
+            {
+                *control_flow = ControlFlow::Exit;
+                return;
             }
-            let period = t_now.elapsed().unwrap().as_secs_f64();
-            println!("physics fps {}", 1.0/period);
         }
-    }
+
+        // Handle input events
+        if input.update(&event) {
+            // Close events
+            if input.key_pressed(VirtualKeyCode::Escape) || input.quit() {
+                *control_flow = ControlFlow::Exit;
+                return;
+            }
+
+            // Resize the window
+            if let Some(size) = input.window_resized() {
+                pixels.resize_surface(size.width, size.height);
+            }
+
+            // Update internal state and request a redraw
+            world.update(dt);
+            window.request_redraw();
+        }
+        elapsed = Some(now.unwrap().elapsed());
+        print!("dt: {}\r", dt);
+    });
 }
