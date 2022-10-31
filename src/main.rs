@@ -52,13 +52,8 @@ fn main(){
 
     //generate particles
     let mut particles: Vec<Particle> = Vec::new();
-    let n_particles: usize = 1000;
-    for n in 0..n_particles {
-        let mut mass = 1.0;
-        if n%20 == 0{
-            mass = 100.0;
-        }
-        let particle = Particle::new(x_range.sample(&mut rng),  y_range.sample(&mut rng), mass);
+    for n in 0..gl.particles{
+        let particle = Particle::new(x_range.sample(&mut rng),  y_range.sample(&mut rng));
         particles.push(particle);
     }
 
@@ -69,7 +64,7 @@ fn main(){
     let mut world = World::new(particles);
     world.ggs.push(gg1);
     world.ggs.push(gg2);
-    world.ggs.push(gg3);
+    //world.ggs.push(gg3);
     
     let dt = 1.0;
     event_loop.run(move |event, _, control_flow| {

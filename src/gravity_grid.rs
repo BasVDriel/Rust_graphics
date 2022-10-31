@@ -5,10 +5,10 @@ use config::Config;
 struct Permutation{
     x1: isize,
     y1: isize,
-    mass1: f32,
+    mass1: u32,
     x2: isize,
     y2: isize,
-    mass2: f32,
+    mass2: u32,
     cell_size: f32,
 }
 pub struct GravityGrid{
@@ -16,7 +16,7 @@ pub struct GravityGrid{
     pub width: u32,
     pub height: u32,
     pub cell_size: f64,
-    pub cell_mass: Vec<f32>,
+    pub cell_mass: Vec<u32>,
     offset: [f32; 2],
     cell_forces: Vec<Vector2<f32>>,
     pub gl: Config,
@@ -26,7 +26,7 @@ impl GravityGrid{
     pub fn new(world_width: u32, world_height: u32, cell_size: f64) -> GravityGrid{
         let grid_width = 4+world_width/cell_size as u32;
         let grid_height = 4+world_height/cell_size as u32;
-        let cell_mass = vec![0.0; (grid_height*grid_width) as usize];
+        let cell_mass = vec![0; (grid_height*grid_width) as usize];
         let zero: Vector2<f32> = [0.0,0.0];
         let cell_forces = vec![zero; (grid_height*grid_width) as usize];
         let gl = Config::new();
@@ -65,7 +65,7 @@ impl GravityGrid{
 
     pub fn zero_mass(&mut self){
         for i in 0..self.cell_mass.len(){
-            self.cell_mass[i] = 0.0;
+            self.cell_mass[i] = 0;
         }
     }
 
@@ -74,21 +74,18 @@ impl GravityGrid{
             let cell_index = self.get_index(particle);
             if cell_index.is_some(){
                 let cell = self.cell_mass.get_mut(cell_index.unwrap()).unwrap();
-                *cell = *cell + particle.mass;
+                *cell = *cell + 1;
             }
         }
     }
 
-    fn compute_gravity(cell_size: f32, x1: isize, y1: isize, mass1: f32, x2: isize,  y2: isize, mass2: f32, g: f32)-> Vector2<f32>{
-        //compute the force between two cells using the formula F = G*m1*m2/r^2
+    fn compute_gravity(cell_size: f32, x1: isize, y1: isize, mass1: u32, x2: isize,  y2: isize, mass2: u32, g: f32)-> Vector2<f32>{
+        //compute the force between two cells using the formula F = G*m1*m2/r^
         let x = (x2 - x1) as f32 * cell_size;
         let y = (y2 - y1) as f32 * cell_size;
         let r_squared = x*x + y*y;
-        let force = g*mass1*mass2/r_squared;
-        let angle = y.atan2(x);
-        let x_force = force*angle.cos();
-        let y_force = force*angle.sin();
-        [x_force, y_force]
+        let force = g*mass1 as f32*mass2 as f32/r_squared;
+        [x*force, y*force]
     }
 
     fn devide_and_conquer(perms: &mut [Permutation], g: f32) -> [f32; 2]{
@@ -140,7 +137,7 @@ impl GravityGrid{
                         let index2 = y2 as usize*self.width as usize + x2 as usize;
                         let mass1 = self.cell_mass[index1];
                         let mass2 = self.cell_mass[index2];
-                        if mass1 != 0.0 && mass2 != 0.0 && index1 != index2{
+                        if mass1 != 0 && mass2 != 0 && index1 != index2{
                             let perm = Permutation{
                                 x1: x1,
                                 y1: y1,

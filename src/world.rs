@@ -49,8 +49,8 @@ impl World {
             if x < self.gl.width && y < self.gl.height && x > 0 && y > 0{
                 let index = (y*self.gl.width + x) as usize;
                 frame[index*4] = 255;
-                frame[index*4 + 1] = 0;
-                frame[index*4 + 2] = 0;
+                frame[index*4 + 1] = 255;
+                frame[index*4 + 2] = 255;
                 frame[index*4 + 3] = 255;
             }
         }
