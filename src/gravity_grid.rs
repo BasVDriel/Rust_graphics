@@ -1,6 +1,6 @@
-use rayon::prelude::*;
 use vecmath::*;
 use particle::Particle;
+use config::Config;
 
 struct Permutation{
     x1: isize,
@@ -11,46 +11,56 @@ struct Permutation{
     mass2: f32,
     cell_size: f32,
 }
-
-static G: f32 = 10.0;
 pub struct GravityGrid{
     //pub gravity_grid: Grid,
     pub width: u32,
     pub height: u32,
     pub cell_size: f64,
     pub cell_mass: Vec<f32>,
+    offset: [f32; 2],
     cell_forces: Vec<Vector2<f32>>,
+    pub gl: Config,
 }
 
 impl GravityGrid{
-    pub fn new(grid_width: u32, grid_height: u32, cell_size: f64) -> GravityGrid{
+    pub fn new(world_width: u32, world_height: u32, cell_size: f64) -> GravityGrid{
+        let grid_width = 4+world_width/cell_size as u32;
+        let grid_height = 4+world_height/cell_size as u32;
         let cell_mass = vec![0.0; (grid_height*grid_width) as usize];
         let zero: Vector2<f32> = [0.0,0.0];
         let cell_forces = vec![zero; (grid_height*grid_width) as usize];
-
+        let gl = Config::new();
         GravityGrid {
             width: grid_width, 
             height: grid_height, 
             cell_size: cell_size, 
             cell_mass: cell_mass, 
+            offset: [2.0*cell_size as f32, 2.0*cell_size as f32],
             cell_forces: cell_forces,
+            gl: Config::new(),
         }
     }
 
+    pub fn set_offset(&mut self, x: f32, y: f32){
+        self.offset = [x,y];
+    }
+
     fn get_index(&self, particle: &mut Particle) -> Option<usize>{
-        let x = particle.x_pos as f32;
-        let y = particle.y_pos as f32;
-        let cell_size = self.cell_size as f32;
-
-        let x_index = (x/cell_size).floor() as u32;
-        let y_index = (y/cell_size).floor() as u32;
-
+        let x = particle.x_pos;
+        let y = particle.y_pos;
         let mut index = None;
-        if x_index < self.width && y_index < self.height{
+        if x < 0.0 || y < 0.0{
+            particle.index = index;
+            return index
+        }
+        let x_index = ((x+ self.offset[0])/self.cell_size as f32 ).floor() as u32;
+        let y_index = ((y+ self.offset[0])/self.cell_size as f32).floor() as u32;
+
+        if x_index < self.width && y_index < self.height {
             index = Some((y_index*self.width + x_index) as usize);
             particle.index = index;
         }
-        index
+        return index
     }
 
     pub fn zero_mass(&mut self){
@@ -62,39 +72,39 @@ impl GravityGrid{
     pub fn compute_mass(&mut self, particles: &mut Vec<Particle>){
         for particle in particles.iter_mut(){
             let cell_index = self.get_index(particle);
-            if cell_index != None{
+            if cell_index.is_some(){
                 let cell = self.cell_mass.get_mut(cell_index.unwrap()).unwrap();
                 *cell = *cell + particle.mass;
             }
         }
     }
 
-    fn compute_gravity(cell_size: f32, x1: isize, y1: isize, mass1: f32, x2: isize,  y2: isize, mass2: f32)-> Vector2<f32>{
+    fn compute_gravity(cell_size: f32, x1: isize, y1: isize, mass1: f32, x2: isize,  y2: isize, mass2: f32, g: f32)-> Vector2<f32>{
         //compute the force between two cells using the formula F = G*m1*m2/r^2
         let x = (x2 - x1) as f32 * cell_size;
         let y = (y2 - y1) as f32 * cell_size;
         let r_squared = x*x + y*y;
-        let force = G*mass1*mass2/r_squared;
+        let force = g*mass1*mass2/r_squared;
         let angle = y.atan2(x);
         let x_force = force*angle.cos();
         let y_force = force*angle.sin();
         [x_force, y_force]
     }
 
-    fn devide_and_conquer(perms: &mut [Permutation]) -> [f32; 2]{
+    fn devide_and_conquer(perms: &mut [Permutation], g: f32) -> [f32; 2]{
         let l = perms.len();
         if l >= 2 {
             let mid = perms.len()/2;
             let (lo, hi) = perms.split_at_mut(mid);
             let (f1, f2) = rayon::join(
-                || GravityGrid::devide_and_conquer(lo),
-                || GravityGrid::devide_and_conquer(hi),
+                || GravityGrid::devide_and_conquer(lo, g),
+                || GravityGrid::devide_and_conquer(hi, g),
             );
             return [f1[0] + f2[0], f1[1] + f2[1]]
         }
         else{   
             let perm = &perms[0];
-            return GravityGrid::compute_gravity(perm.cell_size, perm.x1, perm.y1, perm.mass1, perm.x2, perm.y2, perm.mass2)
+            return GravityGrid::compute_gravity(perm.cell_size, perm.x1, perm.y1, perm.mass1, perm.x2, perm.y2, perm.mass2, g)
         }
     }
 
@@ -148,7 +158,7 @@ impl GravityGrid{
                     self.cell_forces[index1] = [0.0, 0.0];
                 }
                 else{
-                    self.cell_forces[index1] = GravityGrid::devide_and_conquer(&mut permutations);
+                    self.cell_forces[index1] = GravityGrid::devide_and_conquer(&mut permutations, self.gl.g);
                 }      
             }   
         }
